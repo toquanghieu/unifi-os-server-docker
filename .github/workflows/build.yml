@@ -202,6 +202,15 @@ jobs:
             $DOCKER_IMAGE:$VERSION-amd64 \
             $DOCKER_IMAGE:$VERSION-arm64
 
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: hieutq/unifi-os-server
+          short-description: "Self-hosted UniFi OS Server - single volume, no privileged mode, multi-arch, auto-updated"
+          readme-filepath: ./README.md
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
