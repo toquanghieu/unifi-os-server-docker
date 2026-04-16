@@ -17,7 +17,8 @@ env:
 
 jobs:
   extract-amd64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -45,32 +46,34 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
-      - name: Download installer
+      - name: Install UniFi OS Server
         run: |
           curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
-          chmod +x unifi-os-server
+          sudo chmod +x unifi-os-server
+          echo "y" | sudo ./unifi-os-server
+        continue-on-error: true
 
-      - name: Run installer to extract image
+      - name: Copy podman image to runner storage
         run: |
-          sudo ./unifi-os-server install || true
+          mkdir -p /home/runner/.local/share/containers/storage/overlay
+          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay/. \
+            /home/runner/.local/share/containers/storage/overlay/
+          mkdir -p /home/runner/.local/share/containers/storage/overlay-images
+          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-images/. \
+            /home/runner/.local/share/containers/storage/overlay-images/
+          mkdir -p /home/runner/.local/share/containers/storage/overlay-layers
+          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-layers/. \
+            /home/runner/.local/share/containers/storage/overlay-layers/
+          sudo chown -R runner:runner /home/runner/.local/share/containers/storage
+          podman images
 
-      - name: Extract and save podman image
+      - name: Save base image as Docker archive
         run: |
-          # The installer puts the image in podman storage under /home/uosserver
-          sudo cp -r /home/uosserver/.local/share/containers ./containers || \
-            sudo cp -r /home/uosserver/.config/containers ./containers || true
-          sudo chown -R $USER:$USER ./containers
-
-          # Get image info from podman
-          IMAGE_TAG=$(sudo podman --root /home/uosserver/.local/share/containers/storage images --format "{{.Repository}}:{{.Tag}}" | head -1)
+          IMAGE_TAG=$(podman images uosserver --noheading | awk '{print $1":"$2}')
           echo "Found image: $IMAGE_TAG"
-
-          # Save as Docker archive
-          sudo podman --root /home/uosserver/.local/share/containers/storage save \
-            --format docker-archive -o base-image-amd64.tar "$IMAGE_TAG"
+          podman save --format docker-archive -o base-image-amd64.tar "$IMAGE_TAG"
 
       - name: Upload base image artifact
         uses: actions/upload-artifact@v4
@@ -81,6 +84,7 @@ jobs:
 
   extract-arm64:
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,25 +99,34 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
-      - name: Download installer
+      - name: Install UniFi OS Server
         run: |
           curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
-          chmod +x unifi-os-server
+          sudo chmod +x unifi-os-server
+          echo "y" | sudo ./unifi-os-server
+        continue-on-error: true
 
-      - name: Run installer to extract image
+      - name: Copy podman image to runner storage
         run: |
-          sudo ./unifi-os-server install || true
+          mkdir -p /home/runner/.local/share/containers/storage/overlay
+          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay/. \
+            /home/runner/.local/share/containers/storage/overlay/
+          mkdir -p /home/runner/.local/share/containers/storage/overlay-images
+          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-images/. \
+            /home/runner/.local/share/containers/storage/overlay-images/
+          mkdir -p /home/runner/.local/share/containers/storage/overlay-layers
+          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-layers/. \
+            /home/runner/.local/share/containers/storage/overlay-layers/
+          sudo chown -R runner:runner /home/runner/.local/share/containers/storage
+          podman images
 
-      - name: Extract and save podman image
+      - name: Save base image as Docker archive
         run: |
-          IMAGE_TAG=$(sudo podman --root /home/uosserver/.local/share/containers/storage images --format "{{.Repository}}:{{.Tag}}" | head -1)
+          IMAGE_TAG=$(podman images uosserver --noheading | awk '{print $1":"$2}')
           echo "Found image: $IMAGE_TAG"
-
-          sudo podman --root /home/uosserver/.local/share/containers/storage save \
-            --format docker-archive -o base-image-arm64.tar "$IMAGE_TAG"
+          podman save --format docker-archive -o base-image-arm64.tar "$IMAGE_TAG"
 
       - name: Upload base image artifact
         uses: actions/upload-artifact@v4
