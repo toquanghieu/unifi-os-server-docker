@@ -50,9 +50,28 @@ jobs:
 
       - name: Install UniFi OS Server
         run: |
+          mkdir -p /home/runner/.config/containers
+          chmod 755 /home/runner /home/runner/.config /home/runner/.config/containers
+          touch /home/runner/.config/containers/storage.conf
+          chmod 644 /home/runner/.config/containers/storage.conf
           curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
           sudo chmod +x unifi-os-server
           echo "y" | sudo ./unifi-os-server
+        continue-on-error: true
+
+      - name: Debug installed paths
+        run: |
+          echo "==> Checking uosserver home..."
+          sudo ls -la /home/uosserver/ 2>/dev/null || echo "No /home/uosserver"
+          sudo ls -la /home/uosserver/.local/share/containers/storage/ 2>/dev/null || echo "No uosserver local storage"
+          echo "==> Checking /var/lib/uosserver..."
+          sudo ls -la /var/lib/uosserver/ 2>/dev/null || echo "No /var/lib/uosserver"
+          echo "==> Checking podman conf..."
+          sudo cat /var/lib/uosserver/containers.conf 2>/dev/null || echo "No containers.conf"
+          echo "==> Checking uosserver podman images..."
+          sudo -u uosserver podman images 2>/dev/null || \
+            sudo podman --root /home/uosserver/.local/share/containers/storage images 2>/dev/null || \
+            echo "Could not list images"
         continue-on-error: true
 
       - name: Find and copy podman image to runner storage
@@ -129,9 +148,28 @@ jobs:
 
       - name: Install UniFi OS Server
         run: |
+          mkdir -p /home/runner/.config/containers
+          chmod 755 /home/runner /home/runner/.config /home/runner/.config/containers
+          touch /home/runner/.config/containers/storage.conf
+          chmod 644 /home/runner/.config/containers/storage.conf
           curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
           sudo chmod +x unifi-os-server
           echo "y" | sudo ./unifi-os-server
+        continue-on-error: true
+
+      - name: Debug installed paths
+        run: |
+          echo "==> Checking uosserver home..."
+          sudo ls -la /home/uosserver/ 2>/dev/null || echo "No /home/uosserver"
+          sudo ls -la /home/uosserver/.local/share/containers/storage/ 2>/dev/null || echo "No uosserver local storage"
+          echo "==> Checking /var/lib/uosserver..."
+          sudo ls -la /var/lib/uosserver/ 2>/dev/null || echo "No /var/lib/uosserver"
+          echo "==> Checking podman conf..."
+          sudo cat /var/lib/uosserver/containers.conf 2>/dev/null || echo "No containers.conf"
+          echo "==> Checking uosserver podman images..."
+          sudo -u uosserver podman images 2>/dev/null || \
+            sudo podman --root /home/uosserver/.local/share/containers/storage images 2>/dev/null || \
+            echo "Could not list images"
         continue-on-error: true
 
       - name: Find and copy podman image to runner storage
