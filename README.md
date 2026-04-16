@@ -1,6 +1,6 @@
 # UniFi OS Server - Docker
 
-[![Build and Push](https://github.com/hieutq/unifi-os-server-docker/actions/workflows/build.yml/badge.svg)](https://github.com/hieutq/unifi-os-server-docker/actions/workflows/build.yml)
+[![Build and Push](https://github.com/toquanghieu/unifi-os-server-docker/actions/workflows/build.yml/badge.svg)](https://github.com/toquanghieu/unifi-os-server-docker/actions/workflows/build.yml)
 [![Docker Hub](https://img.shields.io/docker/pulls/hieutq/unifi-os-server)](https://hub.docker.com/r/hieutq/unifi-os-server)
 
 Self-hosted [UniFi OS Server](https://help.ui.com/hc/en-us/articles/34210126298775-Self-Hosting-UniFi) in Docker with a single volume, no privileged mode, and automatic updates.
@@ -23,7 +23,7 @@ Self-hosted [UniFi OS Server](https://help.ui.com/hc/en-us/articles/342101262987
 ### Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/hieutq/unifi-os-server-docker.git
+git clone https://github.com/toquanghieu/unifi-os-server-docker.git
 cd unifi-os-server-docker
 cp .env.example .env
 # Edit .env and set UOS_SYSTEM_IP to your server's hostname or IP
