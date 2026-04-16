@@ -1,0 +1,119 @@
+name: Build and Push
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "UOS Server version to build"
+        required: false
+        default: ""
+
+env:
+  DOCKER_IMAGE: hieutq/unifi-os-server
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            installer_suffix: x64
+          - arch: arm64
+            platform: linux/arm64
+            installer_suffix: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install extraction tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binwalk podman
+
+      - name: Download and extract base image
+        run: |
+          # Fetch the installer URL for this architecture
+          INSTALLER_URL="https://fw-download.ubnt.com/data/unifi-os-server/0a39-uosserver-${{ steps.version.outputs.version }}-${{ matrix.installer_suffix }}.bin"
+          ./scripts/extract-image.sh "$INSTALLER_URL" "uosserver-base:${{ steps.version.outputs.version }}-${{ matrix.arch }}"
+
+      - name: Save extracted base image
+        run: |
+          docker save "uosserver-base:${{ steps.version.outputs.version }}-${{ matrix.arch }}" \
+            -o base-image-${{ matrix.arch }}.tar
+
+      - name: Upload base image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-image-${{ matrix.arch }}
+          path: base-image-${{ matrix.arch }}.tar
+          retention-days: 1
+
+  push:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all base image artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Load base images
+        run: |
+          docker load -i base-image-amd64/base-image-amd64.tar
+          docker load -i base-image-arm64/base-image-arm64.tar
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BASE_IMAGE=uosserver-base:${{ steps.version.outputs.version }}
+            UOS_SERVER_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:latest
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
