@@ -116,7 +116,13 @@ jobs:
 
       - name: Save base image as Docker archive
         run: |
-          IMAGE_TAG=$(podman images uosserver --noheading | awk '{print $1":"$2}')
+          echo "==> All podman images:"
+          podman images --no-trunc
+          IMAGE_TAG=$(podman images --noheading --format "{{.Repository}}:{{.Tag}}" | grep -v '<none>' | head -1)
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "ERROR: No podman images found"
+            exit 1
+          fi
           echo "Found image: $IMAGE_TAG"
           podman save --format docker-archive -o base-image-amd64.tar "$IMAGE_TAG"
 
@@ -214,7 +220,13 @@ jobs:
 
       - name: Save base image as Docker archive
         run: |
-          IMAGE_TAG=$(podman images uosserver --noheading | awk '{print $1":"$2}')
+          echo "==> All podman images:"
+          podman images --no-trunc
+          IMAGE_TAG=$(podman images --noheading --format "{{.Repository}}:{{.Tag}}" | grep -v '<none>' | head -1)
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "ERROR: No podman images found"
+            exit 1
+          fi
           echo "Found image: $IMAGE_TAG"
           podman save --format docker-archive -o base-image-arm64.tar "$IMAGE_TAG"
 
