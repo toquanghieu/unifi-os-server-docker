@@ -32,6 +32,9 @@ for ORIG in "${!SYMLINK_MAP[@]}"; do
     # Create parent dir if needed and symlink
     mkdir -p "$(dirname "$ORIG")"
     ln -sfn "$TARGET" "$ORIG"
+
+    # Ensure target dir is writable
+    chmod 755 "$TARGET"
 done
 
 # --- UUID Management ---
@@ -99,7 +102,10 @@ if [ -n "${UOS_SYSTEM_IP+1}" ] && [ -n "$UOS_SYSTEM_IP" ]; then
         echo "system_ip=$UOS_SYSTEM_IP" > "$UNIFI_SYSTEM_PROPERTIES"
     else
         if grep -q "^system_ip=.*" "$UNIFI_SYSTEM_PROPERTIES"; then
-            sed -i "s/^system_ip=.*/system_ip=$UOS_SYSTEM_IP/" "$UNIFI_SYSTEM_PROPERTIES"
+            TMP_FILE=$(mktemp /tmp/system.properties.XXXXXX)
+            sed "s/^system_ip=.*/system_ip=$UOS_SYSTEM_IP/" "$UNIFI_SYSTEM_PROPERTIES" > "$TMP_FILE"
+            cat "$TMP_FILE" > "$UNIFI_SYSTEM_PROPERTIES"
+            rm -f "$TMP_FILE"
         else
             echo "system_ip=$UOS_SYSTEM_IP" >> "$UNIFI_SYSTEM_PROPERTIES"
         fi

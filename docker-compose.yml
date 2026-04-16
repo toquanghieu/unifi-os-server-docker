@@ -4,9 +4,22 @@ services:
     container_name: unifi-os-server
     cgroup: host
     cap_add:
-      - NET_RAW
-      - NET_ADMIN
       - SYS_ADMIN
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+      - FOWNER
+      - CHOWN
+      - SETUID
+      - SETGID
+      - KILL
+      - SYS_CHROOT
+      - SYS_PTRACE
+      - SYS_RESOURCE
+      - AUDIT_WRITE
+      - MKNOD
     cap_drop:
       - ALL
     tmpfs:
@@ -20,7 +33,7 @@ services:
       - UOS_UUID=${UOS_UUID:-}
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - ./unifi:/unifi
+      - unifi_data:/unifi
     ports:
       - "11443:443"        # GUI/API
       - "8080:8080"        # Device communication
@@ -39,3 +52,6 @@ services:
       # - "8881:8881"      # Hotspot redirect (HTTP)
       # - "8882:8882"      # Hotspot redirect (HTTP)
     restart: unless-stopped
+
+volumes:
+  unifi_data:
