@@ -1,0 +1,13 @@
+.git
+.github
+docs
+*.md
+*.tar
+*.tar.gz
+_binwalk*/
+build/
+unifi/
+.env
+.env.example
+LICENSE
+.gitignore
