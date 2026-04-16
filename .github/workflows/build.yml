@@ -7,26 +7,19 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "UOS Server version to build"
+        description: "UOS Server version to build (leave empty to use Dockerfile version)"
         required: false
         default: ""
 
 env:
   DOCKER_IMAGE: hieutq/unifi-os-server
+  FIRMWARE_API: https://fw-update.ubnt.com/api/firmware-latest
 
 jobs:
-  build:
+  extract-amd64:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            platform: linux/amd64
-            installer_suffix: x64
-          - arch: arm64
-            platform: linux/arm64
-            installer_suffix: arm64
-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,57 +28,133 @@ jobs:
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            VERSION="${{ github.event.inputs.version }}"
           else
-            echo "version=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)" >> "$GITHUB_OUTPUT"
+            VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Using version: $VERSION"
 
-      - name: Install extraction tools
+      - name: Get download URL from Ubiquiti API
+        id: download
         run: |
-          sudo apt-get update
-          sudo apt-get install -y binwalk podman
+          URL=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-x64&filter=eq~~channel~~release" \
+            | jq -r '._embedded.firmware[0]._links.data.href')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Download URL: $URL"
 
-      - name: Download and extract base image
+      - name: Free disk space
         run: |
-          # Fetch the installer URL for this architecture
-          INSTALLER_URL="https://fw-download.ubnt.com/data/unifi-os-server/0a39-uosserver-${{ steps.version.outputs.version }}-${{ matrix.installer_suffix }}.bin"
-          ./scripts/extract-image.sh "$INSTALLER_URL" "uosserver-base:${{ steps.version.outputs.version }}-${{ matrix.arch }}"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
 
-      - name: Save extracted base image
+      - name: Download installer
         run: |
-          docker save "uosserver-base:${{ steps.version.outputs.version }}-${{ matrix.arch }}" \
-            -o base-image-${{ matrix.arch }}.tar
+          curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
+          chmod +x unifi-os-server
+
+      - name: Run installer to extract image
+        run: |
+          sudo ./unifi-os-server install || true
+
+      - name: Extract and save podman image
+        run: |
+          # The installer puts the image in podman storage under /home/uosserver
+          sudo cp -r /home/uosserver/.local/share/containers ./containers || \
+            sudo cp -r /home/uosserver/.config/containers ./containers || true
+          sudo chown -R $USER:$USER ./containers
+
+          # Get image info from podman
+          IMAGE_TAG=$(sudo podman --root /home/uosserver/.local/share/containers/storage images --format "{{.Repository}}:{{.Tag}}" | head -1)
+          echo "Found image: $IMAGE_TAG"
+
+          # Save as Docker archive
+          sudo podman --root /home/uosserver/.local/share/containers/storage save \
+            --format docker-archive -o base-image-amd64.tar "$IMAGE_TAG"
 
       - name: Upload base image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: base-image-${{ matrix.arch }}
-          path: base-image-${{ matrix.arch }}.tar
+          name: base-image-amd64
+          path: base-image-amd64.tar
+          retention-days: 1
+
+  extract-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get download URL from Ubiquiti API
+        id: download
+        run: |
+          URL=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-arm64&filter=eq~~channel~~release" \
+            | jq -r '._embedded.firmware[0]._links.data.href')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Download URL: $URL"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+
+      - name: Download installer
+        run: |
+          curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
+          chmod +x unifi-os-server
+
+      - name: Run installer to extract image
+        run: |
+          sudo ./unifi-os-server install || true
+
+      - name: Extract and save podman image
+        run: |
+          IMAGE_TAG=$(sudo podman --root /home/uosserver/.local/share/containers/storage images --format "{{.Repository}}:{{.Tag}}" | head -1)
+          echo "Found image: $IMAGE_TAG"
+
+          sudo podman --root /home/uosserver/.local/share/containers/storage save \
+            --format docker-archive -o base-image-arm64.tar "$IMAGE_TAG"
+
+      - name: Upload base image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-image-arm64
+          path: base-image-arm64.tar
           retention-days: 1
 
   push:
-    needs: build
+    needs: [extract-amd64, extract-arm64]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine version
+      - name: Set version
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            VERSION="${{ github.event.inputs.version }}"
           else
-            echo "version=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)" >> "$GITHUB_OUTPUT"
+            VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Download all base image artifacts
+      - name: Download base image artifacts
         uses: actions/download-artifact@v4
 
-      - name: Load base images
+      - name: Load amd64 base image
         run: |
           docker load -i base-image-amd64/base-image-amd64.tar
+          LOADED=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -1)
+          docker tag "$LOADED" uosserver-base:amd64
+          echo "Tagged $LOADED as uosserver-base:amd64"
+
+      - name: Load arm64 base image
+        run: |
           docker load -i base-image-arm64/base-image-arm64.tar
+          LOADED=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -v uosserver-base | head -1)
+          docker tag "$LOADED" uosserver-base:arm64
+          echo "Tagged $LOADED as uosserver-base:arm64"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -99,18 +168,39 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push multi-arch image
+      - name: Build and push amd64
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           build-args: |
-            BASE_IMAGE=uosserver-base:${{ steps.version.outputs.version }}
+            BASE_IMAGE=uosserver-base:amd64
             UOS_SERVER_VERSION=${{ steps.version.outputs.version }}
           tags: |
-            ${{ env.DOCKER_IMAGE }}:latest
-            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}-amd64
+
+      - name: Build and push arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            BASE_IMAGE=uosserver-base:arm64
+            UOS_SERVER_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}-arm64
+
+      - name: Create and push multi-arch manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          docker buildx imagetools create -t $DOCKER_IMAGE:$VERSION \
+            $DOCKER_IMAGE:$VERSION-amd64 \
+            $DOCKER_IMAGE:$VERSION-arm64
+          docker buildx imagetools create -t $DOCKER_IMAGE:latest \
+            $DOCKER_IMAGE:$VERSION-amd64 \
+            $DOCKER_IMAGE:$VERSION-arm64
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')

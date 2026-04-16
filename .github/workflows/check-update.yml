@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  DOCKER_IMAGE: hieutq/unifi-os-server
+  FIRMWARE_API: https://fw-update.ubnt.com/api/firmware-latest
 
 jobs:
   check:
@@ -27,17 +27,14 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Current version: $VERSION"
 
-      - name: Check latest version from Ubiquiti
+      - name: Check latest version from Ubiquiti API
         id: latest
         run: |
-          # Query Ubiquiti firmware API for latest version
-          # The firmware page lists available downloads; parse for the latest version
-          LATEST=$(curl -fsSL "https://fw-download.ubnt.com/data/unifi-os-server" \
-            | grep -oP 'uosserver-\K[0-9]+\.[0-9]+\.[0-9]+' \
-            | sort -V \
-            | tail -1 || echo "")
+          RESPONSE=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-x64&filter=eq~~channel~~release")
 
-          if [ -z "$LATEST" ]; then
+          LATEST=$(echo "$RESPONSE" | jq -r '._embedded.firmware[0].version' | sed 's/^v//')
+
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
             echo "WARNING: Could not determine latest version, skipping"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
