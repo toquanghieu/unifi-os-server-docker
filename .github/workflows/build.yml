@@ -55,18 +55,44 @@ jobs:
           echo "y" | sudo ./unifi-os-server
         continue-on-error: true
 
-      - name: Copy podman image to runner storage
+      - name: Find and copy podman image to runner storage
         run: |
-          mkdir -p /home/runner/.local/share/containers/storage/overlay
-          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay/. \
-            /home/runner/.local/share/containers/storage/overlay/
-          mkdir -p /home/runner/.local/share/containers/storage/overlay-images
-          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-images/. \
-            /home/runner/.local/share/containers/storage/overlay-images/
-          mkdir -p /home/runner/.local/share/containers/storage/overlay-layers
-          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-layers/. \
-            /home/runner/.local/share/containers/storage/overlay-layers/
-          sudo chown -R runner:runner /home/runner/.local/share/containers/storage
+          # Find where the installer stored the podman image
+          echo "==> Searching for podman storage..."
+          STORAGE_PATH=""
+          for CANDIDATE in \
+            /home/uosserver/.local/share/containers/storage \
+            /var/lib/uosserver/containers/storage \
+            /var/lib/containers/storage; do
+            if sudo test -d "$CANDIDATE/overlay-images"; then
+              STORAGE_PATH="$CANDIDATE"
+              break
+            fi
+          done
+
+          # Fallback: search the filesystem
+          if [ -z "$STORAGE_PATH" ]; then
+            echo "==> Candidates not found, searching filesystem..."
+            STORAGE_PATH=$(sudo find / -path "*/containers/storage/overlay-images" -type d 2>/dev/null | head -1 | sed 's|/overlay-images$||')
+          fi
+
+          if [ -z "$STORAGE_PATH" ]; then
+            echo "ERROR: Could not find podman container storage"
+            exit 1
+          fi
+
+          echo "==> Found podman storage at: $STORAGE_PATH"
+          sudo ls -la "$STORAGE_PATH/"
+
+          # Copy to runner's storage
+          RUNNER_STORAGE=/home/runner/.local/share/containers/storage
+          for DIR in overlay overlay-images overlay-layers; do
+            if sudo test -d "$STORAGE_PATH/$DIR"; then
+              mkdir -p "$RUNNER_STORAGE/$DIR"
+              sudo cp -a "$STORAGE_PATH/$DIR/." "$RUNNER_STORAGE/$DIR/"
+            fi
+          done
+          sudo chown -R runner:runner "$RUNNER_STORAGE"
           podman images
 
       - name: Save base image as Docker archive
@@ -108,18 +134,44 @@ jobs:
           echo "y" | sudo ./unifi-os-server
         continue-on-error: true
 
-      - name: Copy podman image to runner storage
+      - name: Find and copy podman image to runner storage
         run: |
-          mkdir -p /home/runner/.local/share/containers/storage/overlay
-          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay/. \
-            /home/runner/.local/share/containers/storage/overlay/
-          mkdir -p /home/runner/.local/share/containers/storage/overlay-images
-          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-images/. \
-            /home/runner/.local/share/containers/storage/overlay-images/
-          mkdir -p /home/runner/.local/share/containers/storage/overlay-layers
-          sudo cp -a /home/uosserver/.local/share/containers/storage/overlay-layers/. \
-            /home/runner/.local/share/containers/storage/overlay-layers/
-          sudo chown -R runner:runner /home/runner/.local/share/containers/storage
+          # Find where the installer stored the podman image
+          echo "==> Searching for podman storage..."
+          STORAGE_PATH=""
+          for CANDIDATE in \
+            /home/uosserver/.local/share/containers/storage \
+            /var/lib/uosserver/containers/storage \
+            /var/lib/containers/storage; do
+            if sudo test -d "$CANDIDATE/overlay-images"; then
+              STORAGE_PATH="$CANDIDATE"
+              break
+            fi
+          done
+
+          # Fallback: search the filesystem
+          if [ -z "$STORAGE_PATH" ]; then
+            echo "==> Candidates not found, searching filesystem..."
+            STORAGE_PATH=$(sudo find / -path "*/containers/storage/overlay-images" -type d 2>/dev/null | head -1 | sed 's|/overlay-images$||')
+          fi
+
+          if [ -z "$STORAGE_PATH" ]; then
+            echo "ERROR: Could not find podman container storage"
+            exit 1
+          fi
+
+          echo "==> Found podman storage at: $STORAGE_PATH"
+          sudo ls -la "$STORAGE_PATH/"
+
+          # Copy to runner's storage
+          RUNNER_STORAGE=/home/runner/.local/share/containers/storage
+          for DIR in overlay overlay-images overlay-layers; do
+            if sudo test -d "$STORAGE_PATH/$DIR"; then
+              mkdir -p "$RUNNER_STORAGE/$DIR"
+              sudo cp -a "$STORAGE_PATH/$DIR/." "$RUNNER_STORAGE/$DIR/"
+            fi
+          done
+          sudo chown -R runner:runner "$RUNNER_STORAGE"
           podman images
 
       - name: Save base image as Docker archive
