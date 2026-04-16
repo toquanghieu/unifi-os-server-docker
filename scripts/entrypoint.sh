@@ -53,10 +53,10 @@ if [ ! -f /unifi/data/uos_uuid ]; then
 fi
 
 # --- Architecture Detection ---
-ARCH="$(dpkg --print-architecture)"
-if [ "$ARCH" == "amd64" ]; then
+ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+if [ "$ARCH" == "amd64" ] || [ "$ARCH" == "x86_64" ]; then
     FIRMWARE_PLATFORM=linux-x64
-elif [ "$ARCH" == "arm64" ]; then
+elif [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
     FIRMWARE_PLATFORM=arm64
 else
     echo "ERROR: Unsupported architecture: $ARCH"
