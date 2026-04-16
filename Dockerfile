@@ -11,6 +11,7 @@ ENV UOS_SERVER_VERSION=${UOS_SERVER_VERSION}
 STOPSIGNAL SIGRTMIN+3
 
 COPY scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY scripts/update-network.sh /usr/local/bin/update-network.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/update-network.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
