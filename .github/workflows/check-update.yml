@@ -1,0 +1,94 @@
+name: Check for Updates
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOCKER_IMAGE: hieutq/unifi-os-server
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get current version from Dockerfile
+        id: current
+        run: |
+          VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current version: $VERSION"
+
+      - name: Check latest version from Ubiquiti
+        id: latest
+        run: |
+          # Query Ubiquiti firmware API for latest version
+          # The firmware page lists available downloads; parse for the latest version
+          LATEST=$(curl -fsSL "https://fw-download.ubnt.com/data/unifi-os-server" \
+            | grep -oP 'uosserver-\K[0-9]+\.[0-9]+\.[0-9]+' \
+            | sort -V \
+            | tail -1 || echo "")
+
+          if [ -z "$LATEST" ]; then
+            echo "WARNING: Could not determine latest version, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest version: $LATEST"
+
+      - name: Compare versions
+        id: compare
+        if: steps.latest.outputs.skip != 'true'
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          LATEST="${{ steps.latest.outputs.version }}"
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "Already up to date ($CURRENT)"
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version available: $CURRENT -> $LATEST"
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Dockerfile version
+        if: steps.compare.outputs.update == 'true'
+        run: |
+          LATEST="${{ steps.latest.outputs.version }}"
+          sed -i "s/UOS_SERVER_VERSION=[0-9.]*/UOS_SERVER_VERSION=$LATEST/" Dockerfile
+
+      - name: Commit and tag
+        if: steps.compare.outputs.update == 'true'
+        run: |
+          LATEST="${{ steps.latest.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Dockerfile
+          git commit -m "chore: bump UOS Server version to $LATEST"
+          git tag "v$LATEST"
+          git push origin main --tags
+
+      - name: Trigger build workflow
+        if: steps.compare.outputs.update == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build.yml',
+              ref: 'main',
+              inputs: {
+                version: '${{ steps.latest.outputs.version }}'
+              }
+            });
