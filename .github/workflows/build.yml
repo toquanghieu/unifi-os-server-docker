@@ -16,11 +16,9 @@ env:
   FIRMWARE_API: https://fw-update.ubnt.com/api/firmware-latest
 
 jobs:
-  extract-amd64:
+  build-amd64:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -34,7 +32,6 @@ jobs:
             VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Using version: $VERSION"
 
       - name: Get download URL from Ubiquiti API
         id: download
@@ -42,11 +39,9 @@ jobs:
           URL=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-x64&filter=eq~~channel~~release" \
             | jq -r '._embedded.firmware[0]._links.data.href')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "Download URL: $URL"
 
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
       - name: Install UniFi OS Server
         run: |
@@ -59,192 +54,59 @@ jobs:
           echo "y" | sudo ./unifi-os-server
         continue-on-error: true
 
-      - name: Debug installed paths
+      - name: Copy podman image to runner and load into Docker
         run: |
-          echo "==> Checking uosserver home..."
-          sudo ls -la /home/uosserver/ 2>/dev/null || echo "No /home/uosserver"
-          sudo ls -la /home/uosserver/.local/share/containers/storage/ 2>/dev/null || echo "No uosserver local storage"
-          echo "==> Checking /var/lib/uosserver..."
-          sudo ls -la /var/lib/uosserver/ 2>/dev/null || echo "No /var/lib/uosserver"
-          echo "==> Checking podman conf..."
-          sudo cat /var/lib/uosserver/containers.conf 2>/dev/null || echo "No containers.conf"
-          echo "==> Checking uosserver podman images..."
-          sudo -u uosserver podman images 2>/dev/null || \
-            sudo podman --root /home/uosserver/.local/share/containers/storage images 2>/dev/null || \
-            echo "Could not list images"
-        continue-on-error: true
-
-      - name: Find and copy podman image to runner storage
-        run: |
-          # Find where the installer stored the podman image
-          echo "==> Searching for podman storage..."
-          STORAGE_PATH=""
-          for CANDIDATE in \
-            /home/uosserver/.local/share/containers/storage \
-            /var/lib/uosserver/containers/storage \
-            /var/lib/containers/storage; do
-            if sudo test -d "$CANDIDATE/overlay-images"; then
-              STORAGE_PATH="$CANDIDATE"
-              break
-            fi
-          done
-
-          # Fallback: search the filesystem
-          if [ -z "$STORAGE_PATH" ]; then
-            echo "==> Candidates not found, searching filesystem..."
-            STORAGE_PATH=$(sudo find / -path "*/containers/storage/overlay-images" -type d 2>/dev/null | head -1 | sed 's|/overlay-images$||')
-          fi
-
-          if [ -z "$STORAGE_PATH" ]; then
-            echo "ERROR: Could not find podman container storage"
-            exit 1
-          fi
-
-          echo "==> Found podman storage at: $STORAGE_PATH"
-          sudo ls -la "$STORAGE_PATH/"
-
-          # Copy to runner's storage
-          RUNNER_STORAGE=/home/runner/.local/share/containers/storage
+          # Copy podman storage to runner
           for DIR in overlay overlay-images overlay-layers; do
-            if sudo test -d "$STORAGE_PATH/$DIR"; then
-              mkdir -p "$RUNNER_STORAGE/$DIR"
-              sudo cp -a "$STORAGE_PATH/$DIR/." "$RUNNER_STORAGE/$DIR/"
+            SRC="/home/uosserver/.local/share/containers/storage/$DIR"
+            DST="/home/runner/.local/share/containers/storage/$DIR"
+            if sudo test -d "$SRC"; then
+              mkdir -p "$DST"
+              sudo cp -a "$SRC/." "$DST/"
             fi
           done
-          sudo chown -R runner:runner "$RUNNER_STORAGE"
+          sudo chown -R runner:runner /home/runner/.local/share/containers/storage
+
+          # Get image name from podman
           podman images
-
-      - name: Save base image as Docker archive
-        run: |
-          echo "==> All podman images:"
-          podman images --no-trunc
           IMAGE_TAG=$(podman images --noheading --format "{{.Repository}}:{{.Tag}}" | grep -v '<none>' | head -1)
-          if [ -z "$IMAGE_TAG" ]; then
-            echo "ERROR: No podman images found"
-            exit 1
-          fi
-          echo "Found image: $IMAGE_TAG"
-          podman save --format docker-archive -o base-image-amd64.tar "$IMAGE_TAG"
+          echo "Podman image: $IMAGE_TAG"
 
-      - name: Upload base image artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: base-image-amd64
-          path: base-image-amd64.tar
-          retention-days: 1
+          # Convert to Docker
+          podman save --format docker-archive -o /tmp/base.tar "$IMAGE_TAG"
+          LOADED=$(docker load -i /tmp/base.tar 2>&1 | grep -oP 'Loaded image: \K.*')
+          echo "Docker loaded: $LOADED"
+          docker tag "$LOADED" uosserver-base:local
+          rm /tmp/base.tar
 
-  extract-arm64:
+          echo "==> All Docker images:"
+          docker images
+
+      - name: Build image
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          docker build \
+            --build-arg BASE_IMAGE=uosserver-base:local \
+            --build-arg UOS_SERVER_VERSION=$VERSION \
+            -t $DOCKER_IMAGE:$VERSION-amd64 \
+            .
+          echo "==> Built image size:"
+          docker images $DOCKER_IMAGE:$VERSION-amd64
+
+      - name: Login and push
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          VERSION="${{ steps.version.outputs.version }}"
+          docker push $DOCKER_IMAGE:$VERSION-amd64
+
+  build-arm64:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Get download URL from Ubiquiti API
-        id: download
-        run: |
-          URL=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-arm64&filter=eq~~channel~~release" \
-            | jq -r '._embedded.firmware[0]._links.data.href')
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "Download URL: $URL"
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-
-      - name: Install UniFi OS Server
-        run: |
-          mkdir -p /home/runner/.config/containers
-          chmod 755 /home/runner /home/runner/.config /home/runner/.config/containers
-          touch /home/runner/.config/containers/storage.conf
-          chmod 644 /home/runner/.config/containers/storage.conf
-          curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
-          sudo chmod +x unifi-os-server
-          echo "y" | sudo ./unifi-os-server
-        continue-on-error: true
-
-      - name: Debug installed paths
-        run: |
-          echo "==> Checking uosserver home..."
-          sudo ls -la /home/uosserver/ 2>/dev/null || echo "No /home/uosserver"
-          sudo ls -la /home/uosserver/.local/share/containers/storage/ 2>/dev/null || echo "No uosserver local storage"
-          echo "==> Checking /var/lib/uosserver..."
-          sudo ls -la /var/lib/uosserver/ 2>/dev/null || echo "No /var/lib/uosserver"
-          echo "==> Checking podman conf..."
-          sudo cat /var/lib/uosserver/containers.conf 2>/dev/null || echo "No containers.conf"
-          echo "==> Checking uosserver podman images..."
-          sudo -u uosserver podman images 2>/dev/null || \
-            sudo podman --root /home/uosserver/.local/share/containers/storage images 2>/dev/null || \
-            echo "Could not list images"
-        continue-on-error: true
-
-      - name: Find and copy podman image to runner storage
-        run: |
-          # Find where the installer stored the podman image
-          echo "==> Searching for podman storage..."
-          STORAGE_PATH=""
-          for CANDIDATE in \
-            /home/uosserver/.local/share/containers/storage \
-            /var/lib/uosserver/containers/storage \
-            /var/lib/containers/storage; do
-            if sudo test -d "$CANDIDATE/overlay-images"; then
-              STORAGE_PATH="$CANDIDATE"
-              break
-            fi
-          done
-
-          # Fallback: search the filesystem
-          if [ -z "$STORAGE_PATH" ]; then
-            echo "==> Candidates not found, searching filesystem..."
-            STORAGE_PATH=$(sudo find / -path "*/containers/storage/overlay-images" -type d 2>/dev/null | head -1 | sed 's|/overlay-images$||')
-          fi
-
-          if [ -z "$STORAGE_PATH" ]; then
-            echo "ERROR: Could not find podman container storage"
-            exit 1
-          fi
-
-          echo "==> Found podman storage at: $STORAGE_PATH"
-          sudo ls -la "$STORAGE_PATH/"
-
-          # Copy to runner's storage
-          RUNNER_STORAGE=/home/runner/.local/share/containers/storage
-          for DIR in overlay overlay-images overlay-layers; do
-            if sudo test -d "$STORAGE_PATH/$DIR"; then
-              mkdir -p "$RUNNER_STORAGE/$DIR"
-              sudo cp -a "$STORAGE_PATH/$DIR/." "$RUNNER_STORAGE/$DIR/"
-            fi
-          done
-          sudo chown -R runner:runner "$RUNNER_STORAGE"
-          podman images
-
-      - name: Save base image as Docker archive
-        run: |
-          echo "==> All podman images:"
-          podman images --no-trunc
-          IMAGE_TAG=$(podman images --noheading --format "{{.Repository}}:{{.Tag}}" | grep -v '<none>' | head -1)
-          if [ -z "$IMAGE_TAG" ]; then
-            echo "ERROR: No podman images found"
-            exit 1
-          fi
-          echo "Found image: $IMAGE_TAG"
-          podman save --format docker-archive -o base-image-arm64.tar "$IMAGE_TAG"
-
-      - name: Upload base image artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: base-image-arm64
-          path: base-image-arm64.tar
-          retention-days: 1
-
-  push:
-    needs: [extract-amd64, extract-arm64]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set version
+      - name: Determine version
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -254,45 +116,87 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Download base image artifacts
-        uses: actions/download-artifact@v5
-
-      - name: Load amd64 base image
+      - name: Get download URL from Ubiquiti API
+        id: download
         run: |
-          docker load -i base-image-amd64/base-image-amd64.tar
-          LOADED=$(docker images --format "{{.Repository}}:{{.Tag}}" | head -1)
-          docker tag "$LOADED" uosserver-base:amd64
-          echo "Tagged $LOADED as uosserver-base:amd64"
+          URL=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-arm64&filter=eq~~channel~~release" \
+            | jq -r '._embedded.firmware[0]._links.data.href')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Load arm64 base image
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Install UniFi OS Server
         run: |
-          docker load -i base-image-arm64/base-image-arm64.tar
-          LOADED=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -v uosserver-base | head -1)
-          docker tag "$LOADED" uosserver-base:arm64
-          echo "Tagged $LOADED as uosserver-base:arm64"
+          mkdir -p /home/runner/.config/containers
+          chmod 755 /home/runner /home/runner/.config /home/runner/.config/containers
+          touch /home/runner/.config/containers/storage.conf
+          chmod 644 /home/runner/.config/containers/storage.conf
+          curl -fSL -o unifi-os-server "${{ steps.download.outputs.url }}"
+          sudo chmod +x unifi-os-server
+          echo "y" | sudo ./unifi-os-server
+        continue-on-error: true
 
-      - name: Login to Docker Hub
-        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      - name: Copy podman image to runner and load into Docker
+        run: |
+          for DIR in overlay overlay-images overlay-layers; do
+            SRC="/home/uosserver/.local/share/containers/storage/$DIR"
+            DST="/home/runner/.local/share/containers/storage/$DIR"
+            if sudo test -d "$SRC"; then
+              mkdir -p "$DST"
+              sudo cp -a "$SRC/." "$DST/"
+            fi
+          done
+          sudo chown -R runner:runner /home/runner/.local/share/containers/storage
 
-      - name: Build and push amd64
+          podman images
+          IMAGE_TAG=$(podman images --noheading --format "{{.Repository}}:{{.Tag}}" | grep -v '<none>' | head -1)
+          echo "Podman image: $IMAGE_TAG"
+
+          podman save --format docker-archive -o /tmp/base.tar "$IMAGE_TAG"
+          LOADED=$(docker load -i /tmp/base.tar 2>&1 | grep -oP 'Loaded image: \K.*')
+          echo "Docker loaded: $LOADED"
+          docker tag "$LOADED" uosserver-base:local
+          rm /tmp/base.tar
+
+          docker images
+
+      - name: Build image
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           docker build \
-            --build-arg BASE_IMAGE=uosserver-base:amd64 \
-            --build-arg UOS_SERVER_VERSION=$VERSION \
-            -t $DOCKER_IMAGE:$VERSION-amd64 \
-            .
-          docker push $DOCKER_IMAGE:$VERSION-amd64
-
-      - name: Build and push arm64
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          docker build \
-            --build-arg BASE_IMAGE=uosserver-base:arm64 \
+            --build-arg BASE_IMAGE=uosserver-base:local \
             --build-arg UOS_SERVER_VERSION=$VERSION \
             -t $DOCKER_IMAGE:$VERSION-arm64 \
             .
+          echo "==> Built image size:"
+          docker images $DOCKER_IMAGE:$VERSION-arm64
+
+      - name: Login and push
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          VERSION="${{ steps.version.outputs.version }}"
           docker push $DOCKER_IMAGE:$VERSION-arm64
+
+  manifest:
+    needs: [build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Create and push multi-arch manifest
         run: |
