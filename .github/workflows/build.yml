@@ -23,7 +23,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Determine version
         id: version
@@ -127,7 +127,7 @@ jobs:
           podman save --format docker-archive -o base-image-amd64.tar "$IMAGE_TAG"
 
       - name: Upload base image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: base-image-amd64
           path: base-image-amd64.tar
@@ -138,7 +138,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Get download URL from Ubiquiti API
         id: download
@@ -231,7 +231,7 @@ jobs:
           podman save --format docker-archive -o base-image-arm64.tar "$IMAGE_TAG"
 
       - name: Upload base image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: base-image-arm64
           path: base-image-arm64.tar
@@ -242,7 +242,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set version
         id: version
@@ -255,7 +255,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download base image artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
 
       - name: Load amd64 base image
         run: |
