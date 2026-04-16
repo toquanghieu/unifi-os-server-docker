@@ -1,0 +1,16 @@
+ARG BASE_IMAGE=uosserver-base:latest
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.source="https://github.com/hieutq/unifi-os-server-docker"
+LABEL org.opencontainers.image.description="UniFi OS Server for Docker"
+LABEL org.opencontainers.image.licenses="MIT"
+
+ARG UOS_SERVER_VERSION=5.0.6
+ENV UOS_SERVER_VERSION=${UOS_SERVER_VERSION}
+
+STOPSIGNAL SIGRTMIN+3
+
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
