@@ -29,7 +29,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+            VERSION=$(grep -oP '^ARG UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -112,7 +112,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+            VERSION=$(grep -oP '^ARG UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -191,7 +191,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+            VERSION=$(grep -oP '^ARG UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 

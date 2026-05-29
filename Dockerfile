@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.description="Self-hosted UniFi OS Server in Docke
 LABEL org.opencontainers.image.licenses="MIT"
 
 ARG UOS_SERVER_VERSION=5.0.8
-ENV UOS_SERVER_VERSION=5.0.8${UOS_SERVER_VERSION}
+ENV UOS_SERVER_VERSION=${UOS_SERVER_VERSION}
 
 STOPSIGNAL SIGRTMIN+3
 

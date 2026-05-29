@@ -23,7 +23,7 @@ jobs:
       - name: Get current version from Dockerfile
         id: current
         run: |
-          VERSION=$(grep -oP 'UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+          VERSION=$(grep -oP '^ARG UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Current version: $VERSION"
 
@@ -62,7 +62,7 @@ jobs:
         if: steps.compare.outputs.update == 'true'
         run: |
           LATEST="${{ steps.latest.outputs.version }}"
-          sed -i "s/UOS_SERVER_VERSION=[0-9.]*/UOS_SERVER_VERSION=$LATEST/" Dockerfile
+          sed -i "s/^ARG UOS_SERVER_VERSION=[0-9.]\+/ARG UOS_SERVER_VERSION=$LATEST/" Dockerfile
 
       - name: Commit and tag
         if: steps.compare.outputs.update == 'true'
