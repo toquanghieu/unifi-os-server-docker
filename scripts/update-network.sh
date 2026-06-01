@@ -24,12 +24,14 @@ latest_version() {
         return
     fi
 
-    # 2. Try Ubiquiti firmware API (unifi-network-server product)
+    # 2. Try Ubiquiti firmware API (the Network app is product "unifi").
+    #    Returns e.g. "v10.4.57-34628-1"; normalize to the "10.4.57" marketing
+    #    version used by the .deb URL.
     local api_ver
     api_ver=$(curl -fsSL \
-        "https://fw-update.ubnt.com/api/firmware-latest?filter=eq~~product~~unifi-network-server&filter=eq~~channel~~release" \
+        "https://fw-update.ubnt.com/api/firmware-latest?filter=eq~~product~~unifi&filter=eq~~channel~~release" \
         2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['_embedded']['firmware'][0]['version'].lstrip('v'))" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['_embedded']['firmware'][0]['version'].lstrip('v').split('-')[0])" \
         2>/dev/null || true)
     if [ -n "$api_ver" ]; then
         echo "$api_ver"

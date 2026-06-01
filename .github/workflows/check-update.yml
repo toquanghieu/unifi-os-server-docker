@@ -21,60 +21,81 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get current version from Dockerfile
+      - name: Get current versions from Dockerfile
         id: current
         run: |
-          VERSION=$(grep -oP '^ARG UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Current version: $VERSION"
+          UOS=$(grep -oP '^ARG UOS_SERVER_VERSION=\K[0-9.]+' Dockerfile)
+          NET=$(grep -oP '^ARG UNIFI_NETWORK_VERSION=\K[0-9.]+' Dockerfile)
+          echo "uos=$UOS" >> "$GITHUB_OUTPUT"
+          echo "net=$NET" >> "$GITHUB_OUTPUT"
+          echo "Current: UOS=$UOS Network=$NET"
 
-      - name: Check latest version from Ubiquiti API
+      - name: Check latest versions from Ubiquiti API
         id: latest
         run: |
-          RESPONSE=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-x64&filter=eq~~channel~~release")
+          # UniFi OS Server (linux-x64, release channel)
+          UOS=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi-os-server&filter=eq~~platform~~linux-x64&filter=eq~~channel~~release" 2>/dev/null \
+            | jq -r '._embedded.firmware[0].version' 2>/dev/null | sed 's/^v//' || true)
+          # UniFi Network application is product "unifi"; normalize
+          # v10.4.57-34628-1 -> 10.4.57 (the marketing version the .deb URL uses)
+          NET=$(curl -fsSL "$FIRMWARE_API?filter=eq~~product~~unifi&filter=eq~~channel~~release" 2>/dev/null \
+            | jq -r '._embedded.firmware[0].version' 2>/dev/null | sed 's/^v//' | cut -d- -f1 || true)
 
-          LATEST=$(echo "$RESPONSE" | jq -r '._embedded.firmware[0].version' | sed 's/^v//')
-
-          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
-            echo "WARNING: Could not determine latest version, skipping"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "Latest version: $LATEST"
+          echo "Latest: UOS=${UOS:-?} Network=${NET:-?}"
+          echo "uos=$UOS" >> "$GITHUB_OUTPUT"
+          echo "net=$NET" >> "$GITHUB_OUTPUT"
 
       - name: Compare versions
         id: compare
-        if: steps.latest.outputs.skip != 'true'
         run: |
-          CURRENT="${{ steps.current.outputs.version }}"
-          LATEST="${{ steps.latest.outputs.version }}"
+          CUR_UOS="${{ steps.current.outputs.uos }}"
+          CUR_NET="${{ steps.current.outputs.net }}"
+          NEW_UOS="${{ steps.latest.outputs.uos }}"
+          NEW_NET="${{ steps.latest.outputs.net }}"
 
-          if [ "$CURRENT" = "$LATEST" ]; then
-            echo "Already up to date ($CURRENT)"
-            echo "update=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version available: $CURRENT -> $LATEST"
-            echo "update=true" >> "$GITHUB_OUTPUT"
+          # Keep current unless the API returned a sane, different value.
+          TARGET_UOS="$CUR_UOS"
+          TARGET_NET="$CUR_NET"
+          UPDATE=false
+
+          if [ -n "$NEW_UOS" ] && [ "$NEW_UOS" != "null" ] && [ "$NEW_UOS" != "$CUR_UOS" ]; then
+            echo "UOS Server: $CUR_UOS -> $NEW_UOS"
+            TARGET_UOS="$NEW_UOS"
+            UPDATE=true
+          fi
+          if [ -n "$NEW_NET" ] && [ "$NEW_NET" != "null" ] && [ "$NEW_NET" != "$CUR_NET" ]; then
+            echo "Network: $CUR_NET -> $NEW_NET"
+            TARGET_NET="$NEW_NET"
+            UPDATE=true
           fi
 
-      - name: Update Dockerfile version
+          [ "$UPDATE" = "false" ] && echo "Already up to date (UOS=$CUR_UOS Network=$CUR_NET)"
+
+          echo "update=$UPDATE" >> "$GITHUB_OUTPUT"
+          echo "uos=$TARGET_UOS" >> "$GITHUB_OUTPUT"
+          echo "net=$TARGET_NET" >> "$GITHUB_OUTPUT"
+
+      - name: Update Dockerfile versions
         if: steps.compare.outputs.update == 'true'
         run: |
-          LATEST="${{ steps.latest.outputs.version }}"
-          sed -i "s/^ARG UOS_SERVER_VERSION=[0-9.]\+/ARG UOS_SERVER_VERSION=$LATEST/" Dockerfile
+          UOS="${{ steps.compare.outputs.uos }}"
+          NET="${{ steps.compare.outputs.net }}"
+          sed -i "s/^ARG UOS_SERVER_VERSION=[0-9.]\+/ARG UOS_SERVER_VERSION=$UOS/" Dockerfile
+          sed -i "s/^ARG UNIFI_NETWORK_VERSION=[0-9.]\+/ARG UNIFI_NETWORK_VERSION=$NET/" Dockerfile
+          grep -nE '^ARG (UOS_SERVER|UNIFI_NETWORK)_VERSION=' Dockerfile
 
       - name: Commit and tag
         if: steps.compare.outputs.update == 'true'
         run: |
-          LATEST="${{ steps.latest.outputs.version }}"
+          UOS="${{ steps.compare.outputs.uos }}"
+          NET="${{ steps.compare.outputs.net }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Dockerfile
-          git commit -m "chore: bump UOS Server version to $LATEST"
-          git tag "v$LATEST"
-          git push origin main --tags
+          git commit -m "chore: bump UOS Server to $UOS, Network to $NET"
+          git tag "v$UOS-net$NET" || echo "tag already exists"
+          git push origin main
+          git push origin "v$UOS-net$NET" || true
 
       - name: Trigger build workflow
         if: steps.compare.outputs.update == 'true'
@@ -87,6 +108,6 @@ jobs:
               workflow_id: 'build.yml',
               ref: 'main',
               inputs: {
-                version: '${{ steps.latest.outputs.version }}'
+                version: '${{ steps.compare.outputs.uos }}'
               }
             });

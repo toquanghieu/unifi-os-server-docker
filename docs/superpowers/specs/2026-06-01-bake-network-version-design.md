@@ -76,9 +76,14 @@ For each arch job (`build-amd64`, `build-arm64`):
 ### 4. `check-update.yml` — watch both products
 
 - Keep the existing UOS check (`unifi-os-server` product).
-- Add a Network check using the firmware API product `unifi-network-server`,
-  channel `release` — the same endpoint `update-network.sh::latest_version()`
-  already uses.
+- Add a Network check using the firmware API product **`unifi`**, channel
+  `release`. (Verified: product `unifi-network-server` returns null; `unifi`
+  returns `v10.4.57-34628-1`, matching the apt repo.) Normalize the marketing
+  version: strip leading `v`, take the part before the first `-`
+  (`v10.4.57-34628-1` → `10.4.57`), which is what the `.deb` URL uses.
+- Also fix `update-network.sh::latest_version()` fallback #2: it currently
+  queries the dead `unifi-network-server` product. Point it at `unifi` with the
+  same normalization so the in-container fallback works too.
 - Read current pinned values from the Dockerfile ARGs (anchored greps).
 - If **either** product is newer than its pinned ARG:
   - `sed` bump the corresponding `^ARG ...=` line (anchored, `[0-9.]\+`, only the
