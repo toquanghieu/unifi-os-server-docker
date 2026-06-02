@@ -22,6 +22,14 @@ Self-hosted [UniFi OS Server](https://help.ui.com/hc/en-us/articles/342101262987
 
 ## Quick Start
 
+> **⚠️ This image runs systemd as PID 1.** It needs the `--cgroupns host`, the
+> `--tmpfs` mounts, `cap_drop: ALL` + the explicit `cap_add` list, and the
+> `/sys/fs/cgroup` mount shown below. Drop any of these and systemd won't boot —
+> the container stays up but **no services start** (see [Troubleshooting](#troubleshooting)).
+> The host must use **cgroup v2**. **Avoid deploying via GUIs (Portainer, etc.)** —
+> they frequently strip `tmpfs`/`cgroupns`; use the compose file or the full
+> `docker run` command below.
+
 ### Docker Compose (recommended)
 
 ```bash
@@ -55,6 +63,42 @@ docker run -d \
 ```
 
 Then open `https://<your-server-ip>:11443` to complete setup.
+
+### Macvlan (static LAN IP)
+
+To give the container its own IP on your LAN (devices reach it directly, no port
+mapping), attach it to a macvlan network instead of publishing ports:
+
+```bash
+# One-time: create the macvlan network (match your LAN subnet/gateway + host NIC)
+docker network create -d macvlan \
+  --subnet 10.10.10.0/23 --gateway 10.10.10.1 \
+  -o parent=eth0 net1010
+
+# Run on the macvlan — note: NO -p flags; the container owns its IP and all ports
+docker run -d \
+  --name unifi-os-server \
+  --network net1010 --ip 10.10.10.56 \
+  --cgroupns host \
+  --cap-drop ALL \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN --cap-add NET_RAW \
+  --cap-add NET_BIND_SERVICE --cap-add DAC_OVERRIDE --cap-add DAC_READ_SEARCH \
+  --cap-add FOWNER --cap-add CHOWN --cap-add SETUID --cap-add SETGID \
+  --cap-add KILL --cap-add SYS_CHROOT --cap-add SYS_PTRACE \
+  --cap-add SYS_RESOURCE --cap-add AUDIT_WRITE --cap-add MKNOD \
+  --tmpfs /run:exec --tmpfs /run/lock --tmpfs /tmp:exec \
+  --tmpfs /var/lib/journal --tmpfs /var/opt/unifi/tmp:size=64m \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+  -v unifi_data:/unifi \
+  -e UOS_SYSTEM_IP=10.10.10.56 \
+  --restart unless-stopped \
+  hieutq/unifi-os-server:latest
+```
+
+Then open `https://10.10.10.56` (port 443 directly — no `:11443`).
+
+> **Note:** with macvlan the Docker host itself **cannot** reach the container's
+> IP (kernel macvlan isolation) — access it from another machine on the LAN.
 
 ## Environment Variables
 
@@ -115,6 +159,34 @@ This image does not use `privileged: true`. Instead:
 - `cgroup: host` required for systemd
 
 These capabilities are needed because UniFi OS Server runs 10+ internal services (MongoDB, PostgreSQL, RabbitMQ, Nginx, etc.) via systemd, each under different system users.
+
+## Troubleshooting
+
+**Container stays up but no services start — logs stop right after the
+`Setting UOS_SYSTEM_IP ...` lines.**
+systemd (PID 1) failed to boot. Check inside the container:
+
+```bash
+docker exec <name> systemctl is-system-running
+```
+
+- `offline` → a required flag is missing. Most often `/run` is not a tmpfs
+  (verify with `docker exec <name> sh -c "mount | grep ' /run '"` — it must say
+  `tmpfs`), or `--cgroupns host` is not set, or the `/sys/fs/cgroup` mount is
+  missing. Recreate the container with the **full** flag set from
+  [Quick Start](#quick-start). A GUI deploy (Portainer, etc.) that silently
+  dropped `tmpfs`/`cgroupns` is the usual culprit.
+- `degraded` is **fine** — a few systemd units (`systemd-journald`, `logind`,
+  `dev-hugepages.mount`, ...) always fail under Docker; UOS works regardless.
+
+**"An unexpected error occurred during setup" in the web UI.**
+Pull `:latest` (or any tag at/after the fix) and recreate. Older images
+reinstalled the standalone UniFi Network `.deb` over the firmware's integrated
+build, which removed the ucore integration the setup wizard waits for:
+
+```bash
+docker pull hieutq/unifi-os-server:latest
+```
 
 ## Building Locally
 
