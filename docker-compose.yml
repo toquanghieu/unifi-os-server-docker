@@ -31,7 +31,6 @@ services:
     environment:
       - UOS_SYSTEM_IP=${UOS_SYSTEM_IP:-}
       - UOS_UUID=${UOS_UUID:-}
-      - UNIFI_NETWORK_VERSION=${UNIFI_NETWORK_VERSION:-}
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - unifi_data:/unifi

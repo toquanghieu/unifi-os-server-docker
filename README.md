@@ -12,11 +12,13 @@ Self-hosted [UniFi OS Server](https://help.ui.com/hc/en-us/articles/342101262987
 - Multi-arch: `linux/amd64` and `linux/arm64`
 - Auto-updated weekly from official Ubiquiti releases
 - Built from the official UniFi OS Server installer
+- UniFi Network application included (the UniFi-OS-integrated build that ships
+  inside the firmware) - no separate install needed
 
 ## Supported Tags
 
 - `latest` - latest stable release
-- `5.0.6` - version-specific
+- `5.1.15` - version-specific (UniFi OS Server version)
 
 ## Quick Start
 

@@ -113,15 +113,5 @@ if [ -n "${UOS_SYSTEM_IP+1}" ] && [ -n "$UOS_SYSTEM_IP" ]; then
     fi
 fi
 
-# --- UniFi Network Version ---
-# If UNIFI_NETWORK_VERSION is set, update the app before starting systemd.
-# Examples:
-#   -e UNIFI_NETWORK_VERSION=latest    → always install the newest version
-#   -e UNIFI_NETWORK_VERSION=8.5.6     → pin to a specific version
-if [ -n "${UNIFI_NETWORK_VERSION:-}" ]; then
-    echo "UNIFI_NETWORK_VERSION=$UNIFI_NETWORK_VERSION — running update-network.sh"
-    /usr/local/bin/update-network.sh || true
-fi
-
 # --- Launch systemd ---
 exec /sbin/init
